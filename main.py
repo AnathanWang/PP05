@@ -7,7 +7,6 @@ from db import (
     list_users,
     add_user,
     delete_user,
-    block_user,
     unlock_user,
     ensure_schema,
     increment_failed,
@@ -16,13 +15,11 @@ from db import (
 )
 import random
 
-try:
-    from PIL import Image, ImageTk
-    _HAS_PIL = True
-except Exception:
-    _HAS_PIL = False
+from PIL import Image, ImageTk
+_HAS_PIL = True
 
 TILE_SIZE = 100
+
 
 class PuzzleCaptcha(tk.Frame):
     def __init__(self, parent, image_dir='capchaImage'):
@@ -30,13 +27,15 @@ class PuzzleCaptcha(tk.Frame):
         self.image_dir = image_dir
         self.correct = [0, 1, 2, 3]
         self.state = list(self.correct)
-        self.images = []  # PhotoImage refs
+        self.images = []
         self.buttons = []
         self.selected = None
         self.solved = False
+        self.tile_size = TILE_SIZE
         self._load_images()
         self._build_ui()
         self.shuffle()
+        self.bind('<Configure>', self._on_resize)
 
     def _load_images(self):
         self.images.clear()
@@ -45,13 +44,13 @@ class PuzzleCaptcha(tk.Frame):
             try:
                 if _HAS_PIL:
                     pil = Image.open(path).convert('RGBA')
-                    pil = pil.resize((TILE_SIZE, TILE_SIZE), Image.LANCZOS)
+                    pil = pil.resize((self.tile_size, self.tile_size), Image.LANCZOS)
                     img = ImageTk.PhotoImage(pil)
                 else:
                     raw = tk.PhotoImage(file=path)
                     w = raw.width()
                     h = raw.height()
-                    factor = max(1, int(max(w, h) / TILE_SIZE))
+                    factor = max(1, int(max(w, h) / max(1, self.tile_size)))
                     if factor > 1:
                         img = raw.subsample(factor, factor)
                     else:
@@ -65,10 +64,13 @@ class PuzzleCaptcha(tk.Frame):
             btn = tk.Button(self, command=lambda p=pos: self.on_click(p))
             r = pos // 2
             c = pos % 2
-            btn.grid(row=r, column=c, padx=2, pady=2, ipadx=10, ipady=10)
+            btn.grid(row=r, column=c, padx=2, pady=2, ipadx=2, ipady=2, sticky='nsew')
             self.buttons.append(btn)
         sh = tk.Button(self, text='Перемешать', command=self.shuffle)
-        sh.grid(row=2, column=0, columnspan=2, pady=(6, 0))
+        sh.grid(row=2, column=0, columnspan=2, pady=(6, 0), sticky='ew')
+        for i in range(2):
+            self.grid_columnconfigure(i, weight=1)
+            self.grid_rowconfigure(i, weight=1)
 
     def _update_buttons(self):
         for pos, btn in enumerate(self.buttons):
@@ -113,36 +115,52 @@ class PuzzleCaptcha(tk.Frame):
     def _check_solved(self):
         if self.state == self.correct:
             self.solved = True
-            # indicate solved (disable buttons)
             for b in self.buttons:
                 b.config(state='disabled')
 
     def is_solved(self):
         return self.solved
 
+    def _on_resize(self, event):
+        try:
+            w = max(1, self.winfo_width())
+            h = max(1, self.winfo_height())
+            avail_w = max(20, (w - 8) // 2)
+            avail_h = max(20, (h - 40) // 2)
+            new_size = min(avail_w, avail_h)
+            if abs(new_size - getattr(self, 'tile_size', TILE_SIZE)) >= 8:
+                self.tile_size = new_size
+                self._load_images()
+                self._update_buttons()
+        except Exception:
+            pass
 
 
 class LoginWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Авторизация")
-        self.geometry("380x240")
+        self.minsize(360, 240)
+        self.resizable(True, True)
         self.create_widgets()
 
     def create_widgets(self):
         tk.Label(self, text="Логин:").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
         self.e_user = tk.Entry(self)
-        self.e_user.grid(row=0, column=1, padx=10, pady=(10, 0))
+        self.e_user.grid(row=0, column=1, padx=10, pady=(10, 0), sticky='ew')
 
         tk.Label(self, text="Пароль:").grid(row=1, column=0, sticky="w", padx=10, pady=(6, 0))
         self.e_pass = tk.Entry(self, show='*')
-        self.e_pass.grid(row=1, column=1, padx=10, pady=(6, 0))
-        # puzzle captcha (image puzzle from capchaImage/1..4.png)
+        self.e_pass.grid(row=1, column=1, padx=10, pady=(6, 0), sticky='ew')
         self.captcha = PuzzleCaptcha(self)
-        self.captcha.grid(row=2, column=0, columnspan=2, pady=(8, 0))
+        self.captcha.grid(row=2, column=0, columnspan=2, pady=(8, 0), sticky='nsew')
 
         self.login_btn = tk.Button(self, text="Войти", command=self.do_Login)
-        self.login_btn.grid(row=3, column=0, columnspan=2, pady=12)
+        self.login_btn.grid(row=3, column=0, columnspan=2, pady=12, sticky='ew')
+
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
     def do_Login(self):
         username = self.e_user.get().strip()
@@ -165,7 +183,7 @@ class LoginWindow(tk.Tk):
 
         def worker(u, p):
             try:
-                res = authenticate_user(u, p)ad
+                res = authenticate_user(u, p)
                 self.after(0, self._on_auth_result, u, res)
             except Exception as e:
                 self.after(0, self._on_result, False, e)
@@ -215,7 +233,8 @@ class UserManager(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title('Управление пользователями')
-        self.geometry('420x320')
+        self.minsize(380, 240)
+        self.resizable(True, True)
         self.create_widgets()
         self.refresh()
 
@@ -299,7 +318,6 @@ class UserManager(tk.Toplevel):
             self.nu.delete(0, 'end')
             self.nu.insert(0, u['username'])
             self.np.delete(0, 'end')
-            # do not prefill real password in UI for security; leave blank
             self.role_var.set(u.get('role') or 'user')
         except Exception as e:
             messagebox.showerror('Ошибка БД', str(e))
@@ -312,7 +330,6 @@ class UserManager(tk.Toplevel):
             messagebox.showwarning('Ввод', 'Введите логин')
             return
         try:
-            # if password empty, don't change it
             pwd = password if password else None
             ok = update_user(username, password=pwd, role=role)
             if ok:
@@ -343,7 +360,6 @@ class UserManager(tk.Toplevel):
 
 
 if __name__ == "__main__":
-    # ensure DB schema exists (columns etc.)
     try:
         ensure_schema()
     except Exception as e:

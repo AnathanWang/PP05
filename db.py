@@ -1,9 +1,6 @@
 import os
 
-try:
-	import pg8000
-except ImportError as e:
-	raise ImportError("Не установлен пакет pg8000. Установите в вашем venv: `python -m pip install pg8000`") from e
+import pg8000
 
 
 def _get_cfg():
@@ -11,7 +8,6 @@ def _get_cfg():
 		"host": os.getenv("DB_HOST", "localhost"),
 		"port": int(os.getenv("DB_PORT", "5432")),
 		"database": os.getenv("DB_NAME", "postgres"),
-		# default to current OS user — often a matching Postgres role exists
 		"user": os.getenv("DB_USER", os.getenv("USER") or os.getlogin()),
 		"password": os.getenv("DB_PASS", ""),
 	}
@@ -34,7 +30,6 @@ def ensure_schema():
 	try:
 		conn = get_conn()
 		cur = conn.cursor()
-		# create table if not exists with base columns
 		cur.execute(
 			"""
 			CREATE TABLE IF NOT EXISTS users (
@@ -44,7 +39,6 @@ def ensure_schema():
 			)
 			"""
 		)
-		# add additional columns if missing
 		cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role text DEFAULT 'user'")
 		cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked boolean DEFAULT false")
 		cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts integer DEFAULT 0")
@@ -201,9 +195,9 @@ def authenticate_user(username: str, password: str) -> dict:
 	if user.get('password') == password:
 		reset_failed(username)
 		return {'ok': True, 'blocked': False, 'role': user.get('role'), 'reason': 'ok', 'attempts': 0}
-	# wrong password
 	attempts, blocked = increment_failed(username)
 	return {'ok': False, 'blocked': blocked, 'role': user.get('role'), 'reason': 'wrong_password', 'attempts': attempts}
+
 
 def test_connection() -> bool:
 	conn = None
@@ -261,7 +255,6 @@ def add_user(username: str, password: str, role: str = 'user') -> bool:
 			(username, password, role),
 		)
 		conn.commit()
-		# check whether inserted
 		cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
 		return cur.fetchone() is not None
 	finally:
