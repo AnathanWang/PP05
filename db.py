@@ -227,8 +227,8 @@ def list_users():
 	try:
 		conn = get_conn()
 		cur = conn.cursor()
-		cur.execute("SELECT username FROM users ORDER BY id")
-		return [row[0] for row in cur.fetchall()]
+		cur.execute("SELECT id, username, role, blocked, failed_attempts FROM users ORDER BY id")
+		return cur.fetchall()
 	finally:
 		try:
 			if cur:
@@ -333,6 +333,8 @@ def update_user(username: str, password: str = None, role: str = None, blocked: 
 				conn.close()
 		except Exception:
 			pass
+
+
 
 
 

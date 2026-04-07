@@ -15,8 +15,13 @@ from db import (
 )
 import random
 
-from PIL import Image, ImageTk
-_HAS_PIL = True
+try:
+    from PIL import Image, ImageTk
+    _HAS_PIL = True
+except Exception:
+    Image = None
+    ImageTk = None
+    _HAS_PIL = False
 
 TILE_SIZE = 100
 
@@ -206,8 +211,12 @@ class LoginWindow(tk.Tk):
             return
         if res.get('ok'):
             messagebox.showinfo('Успех', 'Вы успешно авторизовались')
-            if res.get('role') == 'admin':
+            self.withdraw() # Скрываем окно логина
+            role = res.get('role', 'user')
+            if role == 'admin':
                 self.open_user_manager()
+            else:
+                self.open_user_dashboard(username)
             return
         reason = res.get('reason')
         attempts = res.get('attempts', 0)
@@ -228,19 +237,55 @@ class LoginWindow(tk.Tk):
         um = UserManager(self)
         um.grab_set()
 
+    def open_user_dashboard(self, username):
+        ud = UserDashboard(self, username)
+        ud.grab_set()
+
+
+class UserDashboard(tk.Toplevel):
+    def __init__(self, parent, username):
+        super().__init__(parent)
+        self.parent = parent
+        self.title(f"Рабочий стол: {username}")
+        self.minsize(300, 200)
+        self.protocol("WM_DELETE_WINDOW", self.logout)
+
+        tk.Label(self, text=f"Добро пожаловать, {username}!", font=("Arial", 14)).pack(pady=20)
+        tk.Button(self, text="Выход", command=self.logout, fg="red").pack(pady=10)
+
+    def logout(self):
+        self.destroy()
+        if self.parent:
+            self.parent.deiconify()
+
 
 class UserManager(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
+        self.parent = parent
         self.title('Управление пользователями')
-        self.minsize(380, 240)
+        self.protocol("WM_DELETE_WINDOW", self.logout) # При закрытии окна - разлогин
+        self.minsize(500, 400)
         self.resizable(True, True)
         self.create_widgets()
         self.refresh()
 
     def create_widgets(self):
-        self.user_listbox = tk.Listbox(self)
-        self.user_listbox.pack(fill='both', expand=True, padx=10, pady=10)
+        # Используем Treeview вместо Listbox для отображения всех полей
+        from tkinter import ttk
+        columns = ('login', 'role', 'blocked', 'attempts')
+        self.tree = ttk.Treeview(self, columns=columns, show='headings')
+        self.tree.heading('login', text='Логин')
+        self.tree.heading('role', text='Роль')
+        self.tree.heading('blocked', text='Блокировка')
+        self.tree.heading('attempts', text='Попытки')
+        
+        self.tree.column('login', width=100)
+        self.tree.column('role', width=80)
+        self.tree.column('blocked', width=100)
+        self.tree.column('attempts', width=80)
+        
+        self.tree.pack(fill='both', expand=True, padx=10, pady=10)
 
         frm = tk.Frame(self)
         frm.pack(fill='x', padx=10)
@@ -261,18 +306,29 @@ class UserManager(tk.Toplevel):
         tk.Button(btn_frame, text='Загрузить', command=self.load_user_ui).pack(side='left')
         tk.Button(btn_frame, text='Изменить', command=self.update_user_ui).pack(side='left')
         tk.Button(btn_frame, text='Удалить', command=self.delete_user_ui).pack(side='left')
-        tk.Button(btn_frame, text='Разблокировать', command=self.unblock_user_ui).pack(side='left')
-        tk.Button(btn_frame, text='Обновить', command=self.refresh).pack(side='left')
+        tk.Button(btn_frame, text='Разблокировать', command=self.unblock_user_ui).pack(side='left', padx=2)
+        tk.Button(btn_frame, text='Обновить', command=self.refresh).pack(side='left', padx=2)
+        tk.Button(btn_frame, text='Выход', command=self.logout, fg='red').pack(side='right', padx=2)
+
+    def logout(self):
+        self.destroy()
+        if self.parent:
+            self.parent.deiconify() # Возвращаем окно авторизации
 
     def refresh(self):
         try:
-            users = list_users()
+            users = list_users() # Ожидаем список словарей или кортежей с полной инфой
         except Exception as e:
             messagebox.showerror('DB error', str(e))
             return
-        self.user_listbox.delete(0, 'end')
+        
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
         for u in users:
-            self.user_listbox.insert('end', u)
+            # u: (id, login, role, is_blocked, failed_attempts)
+            status = "Заблокирован" if u[3] else "Активен"
+            self.tree.insert('', 'end', values=(u[1], u[2], status, u[4]))
 
     def add_user_ui(self):
         username = self.nu.get().strip()
@@ -292,11 +348,12 @@ class UserManager(tk.Toplevel):
             messagebox.showerror('Ошибка БД', str(e))
 
     def unblock_user_ui(self):
-        sel = self.user_listbox.curselection()
+        sel = self.tree.selection()
         if not sel:
-            messagebox.showwarning('Select', 'Select a user to unblock')
+            messagebox.showwarning('Выбор', 'Выберите пользователя для разблокировки')
             return
-        username = self.user_listbox.get(sel[0])
+        values = self.tree.item(sel[0])['values']
+        username = values[0]
         try:
             unlock_user(username)
             messagebox.showinfo('ОК', 'Пользователь разблокирован')
@@ -305,11 +362,12 @@ class UserManager(tk.Toplevel):
             messagebox.showerror('Ошибка БД', str(e))
 
     def load_user_ui(self):
-        sel = self.user_listbox.curselection()
+        sel = self.tree.selection()
         if not sel:
-            messagebox.showwarning('Select', 'Select a user to load')
+            messagebox.showwarning('Выбор', 'Выберите пользователя для загрузки')
             return
-        username = self.user_listbox.get(sel[0])
+        values = self.tree.item(sel[0])['values']
+        username = values[0]
         try:
             u = get_user(username)
             if not u:
@@ -341,11 +399,12 @@ class UserManager(tk.Toplevel):
             messagebox.showerror('Ошибка БД', str(e))
 
     def delete_user_ui(self):
-        sel = self.user_listbox.curselection()
+        sel = self.tree.selection()
         if not sel:
             messagebox.showwarning('Выбор', 'Выберите пользователя для удаления')
             return
-        username = self.user_listbox.get(sel[0])
+        values = self.tree.item(sel[0])['values']
+        username = values[0]
         if not messagebox.askyesno('Подтвердите', f'Удалить пользователя {username}?'):
             return
         try:
